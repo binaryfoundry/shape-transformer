@@ -40,7 +40,8 @@ def square():
     ])
 
 def circle():
-    angles = np.linspace(0.7853982, 2 * np.pi + (0.7853982), 12, endpoint=False)
+    rot_offset = np.pi / 4
+    angles = np.linspace(rot_offset, (2 * np.pi) + rot_offset, 12, endpoint=False)
     x, y = np.cos(angles), np.sin(angles)
     return np.column_stack([x, y])
 
