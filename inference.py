@@ -62,9 +62,22 @@ def decode_shape(latent):
         reconstructed = model.decoder(transformed)  # Decode back to shape
     return reconstructed.cpu().numpy().squeeze()
 
+# SLERP function
+def slerp(val, low, high):
+    """Spherical Linear Interpolation (SLERP) for smooth latent space interpolation."""
+    dot = np.sum(low * high, axis=-1) / (np.linalg.norm(low, axis=-1) * np.linalg.norm(high, axis=-1))
+    dot = np.clip(dot, -1.0, 1.0)  # Clip for numerical stability
+    theta = np.arccos(dot) * val
+    sin_theta = np.sin(theta)
+    sin_total_theta = np.sin(np.arccos(dot))
+
+    s0 = np.sin((1 - val) * np.arccos(dot)) / (sin_total_theta + 1e-8)
+    s1 = sin_theta / (sin_total_theta + 1e-8)
+    return s0[:, None] * low + s1[:, None] * high
+
 # Shapes for interpolation
 shapes = [square(), circle()]
-latent_shapes = [encode_shape(shape) for shape in shapes]
+latent_shapes = [encode_shape(shape).cpu().numpy().squeeze() for shape in shapes]
 
 # Number of interpolation steps
 num_steps = 6
@@ -76,11 +89,12 @@ axes[0].set_title("Square")
 axes[-1].plot(shapes[-1][:, 0], shapes[-1][:, 1], 'ro-', label="Circle")
 axes[-1].set_title("Circle")
 
-# Generate interpolated shapes
+# Generate interpolated shapes using SLERP
 for i in range(1, num_steps + 1):
     alpha = i / (num_steps + 1)
-    interpolated_latent = (1 - alpha) * latent_shapes[0] + alpha * latent_shapes[1]
-    reconstructed_shape = decode_shape(interpolated_latent)
+    interpolated_latent = slerp(alpha, latent_shapes[0], latent_shapes[1])
+    interpolated_latent_tensor = torch.tensor(interpolated_latent, dtype=torch.float32).unsqueeze(0).to(device)
+    reconstructed_shape = decode_shape(interpolated_latent_tensor)
 
     axes[i].plot(reconstructed_shape[:, 0], reconstructed_shape[:, 1], 'go-', label=f"α={alpha:.2f}")
     axes[i].set_title(f"α={alpha:.2f}")
