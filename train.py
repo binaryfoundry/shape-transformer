@@ -1,121 +1,140 @@
-# pip install torch numpy matplotlib
-
 import torch
 import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
 import numpy as np
 
-# Device configuration
+# Set device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Variational Transformer Autoencoder
-class VariationalShapeAutoencoder(nn.Module):
-    def __init__(self, embed_dim=16, num_heads=2, num_layers=2):
-        super(VariationalShapeAutoencoder, self).__init__()
+# Hyperparameters
+LATENT_DIM = 32
+EMBED_DIM = 64
+NUM_HEADS = 4
+NUM_LAYERS = 4
+SEQ_LEN = 128  # Max sequence length
+BATCH_SIZE = 32
+EPOCHS = 50
+LEARNING_RATE = 1e-4
 
-        # Encoder: Maps input shapes to latent mean and variance
-        self.encoder = nn.Linear(2, embed_dim)
-        self.mu_layer = nn.Linear(embed_dim, embed_dim)  # Mean of latent distribution
-        self.logvar_layer = nn.Linear(embed_dim, embed_dim)  # Log-variance for reparameterization
+# Custom Dataset (Placeholder for real data)
+class ShapeDataset(Dataset):
+    def __init__(self, num_samples=1000):
+        self.data = [self.generate_shape() for _ in range(num_samples)]
 
-        # Transformer processing latent space
+    def generate_shape(self):
+        num_points = np.random.randint(10, SEQ_LEN - 2)
+        points = np.random.rand(num_points, 2)  # (x, y) coordinates
+        terminator = np.array([[0, 0]])
+        end_sequence = np.array([[1, 1]])
+        shape = np.vstack([points, terminator, end_sequence])
+        padding = np.zeros((SEQ_LEN - shape.shape[0], 2))
+        return np.vstack([shape, padding])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return torch.tensor(self.data[idx], dtype=torch.float32)
+
+# Transformer Encoder
+class TransformerEncoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embedding = nn.Linear(2, EMBED_DIM)
         self.transformer = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads), 
-            num_layers=num_layers
+            nn.TransformerEncoderLayer(d_model=EMBED_DIM, nhead=NUM_HEADS),
+            num_layers=NUM_LAYERS
         )
+        self.fc_mu = nn.Linear(EMBED_DIM, LATENT_DIM)
+        self.fc_logvar = nn.Linear(EMBED_DIM, LATENT_DIM)
 
-        # Decoder: Maps latent space back to shape
-        self.decoder = nn.Linear(embed_dim, 2)
+    def forward(self, x):
+        x = self.embedding(x)  # Convert (batch, seq_len, 2) to (batch, seq_len, embed_dim)
+        x = x.permute(1, 0, 2)  # Change to (seq_len, batch, embed_dim)
+        x = self.transformer(x)
+        x = x.mean(dim=0)  # Aggregate over sequence length
+        mu = self.fc_mu(x)
+        logvar = self.fc_logvar(x)
+        return mu, logvar
+
+# Transformer Decoder
+class TransformerDecoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(LATENT_DIM, EMBED_DIM)
+        self.embedding = nn.Linear(2, EMBED_DIM)
+        self.transformer = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(d_model=EMBED_DIM, nhead=NUM_HEADS),
+            num_layers=NUM_LAYERS
+        )
+        self.fc_out = nn.Linear(EMBED_DIM, 2)
+
+    def forward(self, z, seq):
+        z = self.fc(z).unsqueeze(0).repeat(SEQ_LEN, 1, 1)  # Expand latent dim
+        seq = self.embedding(seq).permute(1, 0, 2)  # Ensure correct shape
+        out = self.transformer(z, seq)
+        return self.fc_out(out.permute(1, 0, 2))  # Convert back to (batch, seq_len, 2)
+
+# VAE Model
+class ShapeVAE(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = TransformerEncoder()
+        self.decoder = TransformerDecoder()
 
     def reparameterize(self, mu, logvar):
-        """Reparameterization trick to sample from N(mu, sigma^2)"""
         std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)  # Random normal noise
+        eps = torch.randn_like(std)
         return mu + eps * std
 
-    def encode(self, points):
-        x = self.encoder(points)
-        mu = self.mu_layer(x)
-        logvar = self.logvar_layer(x)
+    def forward(self, x):
+        mu, logvar = self.encoder(x)
         z = self.reparameterize(mu, logvar)
-        return z, mu, logvar  # Return latent sample and distribution parameters
+        recon_x = self.decoder(z, x)
+        return recon_x, mu, logvar
 
-    def decode(self, z):
-        z = self.transformer(z)
-        return self.decoder(z)
+# Loss Function
+def vae_loss(recon_x, x, mu, logvar):
+    recon_loss = F.mse_loss(recon_x, x, reduction='sum')
+    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    return recon_loss + kl_loss
 
-    def forward(self, points):
-        z, mu, logvar = self.encode(points)
-        return self.decode(z), mu, logvar  # Output reconstruction and latent parameters
+# Training
+def train():
+    dataset = ShapeDataset()
+    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+    model = ShapeVAE().to(device)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-# Define Shapes
-def square():
-    return np.array([
-        [1, 1], [0.333, 1], [-0.333, 1], [-1, 1],
-        [-1, 0.333], [-1, -0.333], [-1, -1], [-0.333, -1],
-        [0.333, -1], [1, -1], [1, -0.333], [1, 0.333]
-    ])
+    for epoch in range(EPOCHS):
+        total_loss = 0
+        for batch in dataloader:
+            batch = batch.to(device)
+            optimizer.zero_grad()
+            recon_batch, mu, logvar = model(batch)
+            loss = vae_loss(recon_batch, batch, mu, logvar)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        print(f"Epoch {epoch+1}, Loss: {total_loss / len(dataloader.dataset)}")
 
-def circle():
-    rot_offset = np.pi / 4
-    angles = np.linspace(rot_offset, (2 * np.pi) + rot_offset, 12, endpoint=False)
-    x, y = np.cos(angles), np.sin(angles)
-    return np.column_stack([x, y])
+    torch.save(model.state_dict(), "shape_vae.pth")
+    print("Model saved!")
 
-# Augmentation: Random Rotation and Flip
-def augment_shape(shape):
-    # Random rotation
-    angle = np.random.uniform(0, 2 * np.pi)
-    rotation_matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
-    rotated_shape = shape @ rotation_matrix.T
+# Generate New Shapes
+def generate():
+    model = ShapeVAE().to(device)
+    model.load_state_dict(torch.load("shape_vae.pth", map_location=device))
+    model.eval()
 
-    # Random flip
-    if np.random.rand() > 0.5:
-        rotated_shape[:, 0] *= -1
-    if np.random.rand() > 0.5:
-        rotated_shape[:, 1] *= -1
+    z = torch.randn(1, LATENT_DIM).to(device)
+    start_seq = torch.zeros(1, SEQ_LEN, 2).to(device)  # Ensure batch size is 1
+    with torch.no_grad():
+        generated_shape = model.decoder(z, start_seq)
+    print(generated_shape.cpu().numpy())
 
-    return rotated_shape
-
-# Prepare dataset
-shapes = [square(), circle()]
-max_len = max(len(shape) for shape in shapes)
-
-# Apply augmentation
-augmented_shapes = [augment_shape(shape) for shape in shapes]
-
-# Pad shapes to ensure uniform size
-padded_shapes = np.array([np.pad(shape, ((0, max_len - len(shape)), (0, 0)), mode='constant') for shape in augmented_shapes])
-shapes_tensor = torch.tensor(padded_shapes, dtype=torch.float32).to(device)
-
-# Initialize model
-model = VariationalShapeAutoencoder().to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-criterion = nn.MSELoss()
-
-def kl_divergence(mu, logvar):
-    return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
-# Training loop
-epochs = 2000
-for epoch in range(epochs):
-    optimizer.zero_grad()
-
-    # Apply augmentation during training
-    augmented_shapes = [augment_shape(shape) for shape in shapes]
-    padded_shapes = np.array([np.pad(shape, ((0, max_len - len(shape)), (0, 0)), mode='constant') for shape in augmented_shapes])
-    shapes_tensor = torch.tensor(padded_shapes, dtype=torch.float32).to(device)
-
-    output, mu, logvar = model(shapes_tensor)
-    recon_loss = criterion(output, shapes_tensor)
-    kl_loss = kl_divergence(mu, logvar)
-    loss = recon_loss + 0.001 * kl_loss  # Balance reconstruction and regularization
-
-    loss.backward()
-    optimizer.step()
-
-    if epoch % 100 == 0:
-        print(f"Epoch {epoch}, Loss: {loss.item()} (Recon: {recon_loss.item()}, KL: {kl_loss.item()})")
-
-# Save model
-torch.save(model.state_dict(), "polygon_vae.pth")
-print("Variational Autoencoder trained and saved successfully!")
+if __name__ == "__main__":
+    train()
+    generate()
