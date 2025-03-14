@@ -6,15 +6,17 @@ import matplotlib.pyplot as plt
 # Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Transformer-based Autoencoder
-class ShapeAutoencoder(nn.Module):
+# Variational Transformer Autoencoder
+class VariationalShapeAutoencoder(nn.Module):
     def __init__(self, embed_dim=16, num_heads=2, num_layers=2):
-        super(ShapeAutoencoder, self).__init__()
+        super(VariationalShapeAutoencoder, self).__init__()
 
-        # Encoder: Maps input shapes to a latent space
+        # Encoder: Maps input shapes to latent mean and variance
         self.encoder = nn.Linear(2, embed_dim)
+        self.mu_layer = nn.Linear(embed_dim, embed_dim)  # Mean of latent distribution
+        self.logvar_layer = nn.Linear(embed_dim, embed_dim)  # Log-variance for reparameterization
 
-        # Transformer for processing latent space
+        # Transformer processing latent space
         self.transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads), 
             num_layers=num_layers
@@ -23,17 +25,32 @@ class ShapeAutoencoder(nn.Module):
         # Decoder: Maps latent space back to shape
         self.decoder = nn.Linear(embed_dim, 2)
 
+    def reparameterize(self, mu, logvar):
+        """Reparameterization trick to sample from N(mu, sigma^2)"""
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)  # Random normal noise
+        return mu + eps * std
+
+    def encode(self, points):
+        x = self.encoder(points)
+        mu = self.mu_layer(x)
+        logvar = self.logvar_layer(x)
+        z = self.reparameterize(mu, logvar)
+        return z, mu, logvar  # Return latent sample and distribution parameters
+
+    def decode(self, z):
+        z = self.transformer(z)
+        return self.decoder(z)
+
     def forward(self, points):
-        x = self.encoder(points)  # Encode (batch, seq_len, embed_dim)
-        x = self.transformer(x)   # Transformer processes (batch, seq_len, embed_dim)
-        x = self.decoder(x)       # Decode back to (batch, seq_len, 2)
-        return x
+        z, mu, logvar = self.encode(points)
+        return self.decode(z), mu, logvar  # Output reconstruction and latent parameters
 
 # Load trained model
-model = ShapeAutoencoder().to(device)
-model.load_state_dict(torch.load("polygon_autoencoder.pth"))
+model = VariationalShapeAutoencoder().to(device)
+model.load_state_dict(torch.load("polygon_vae.pth"))
 model.eval()
-print("Model loaded successfully!")
+print("Variational Autoencoder model loaded successfully!")
 
 # Define shapes
 def square():
@@ -51,21 +68,20 @@ def circle():
 
 # Encode shape into latent space
 def encode_shape(shape):
-    shape_tensor = torch.tensor(shape, dtype=torch.float32).unsqueeze(0).to(device)  # Add batch dimension
+    shape_tensor = torch.tensor(shape, dtype=torch.float32).unsqueeze(0).to(device)
     with torch.no_grad():
-        latent = model.encoder(shape_tensor)  # Get encoded representation
+        latent, _, _ = model.encode(shape_tensor)
     return latent
 
 # Decode from latent space
 def decode_shape(latent):
     with torch.no_grad():
-        transformed = model.transformer(latent)  # Apply transformer processing
-        reconstructed = model.decoder(transformed)  # Decode back to shape
+        reconstructed = model.decode(latent)
     return reconstructed.cpu().numpy().squeeze()
 
-# SLERP function
+# SLERP function for smooth interpolation
 def slerp(val, low, high):
-    """Spherical Linear Interpolation (SLERP) for smooth latent space interpolation."""
+    """Spherical Linear Interpolation (SLERP) for smooth latent space transitions."""
     dot = np.sum(low * high, axis=-1) / (np.linalg.norm(low, axis=-1) * np.linalg.norm(high, axis=-1))
     dot = np.clip(dot, -1.0, 1.0)  # Clip for numerical stability
     theta = np.arccos(dot) * val

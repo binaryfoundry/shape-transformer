@@ -7,15 +7,17 @@ import numpy as np
 # Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Transformer-based Autoencoder
-class ShapeAutoencoder(nn.Module):
+# Variational Transformer Autoencoder
+class VariationalShapeAutoencoder(nn.Module):
     def __init__(self, embed_dim=16, num_heads=2, num_layers=2):
-        super(ShapeAutoencoder, self).__init__()
+        super(VariationalShapeAutoencoder, self).__init__()
 
-        # Encoder: Maps input shapes to a latent space
+        # Encoder: Maps input shapes to latent mean and variance
         self.encoder = nn.Linear(2, embed_dim)
+        self.mu_layer = nn.Linear(embed_dim, embed_dim)  # Mean of latent distribution
+        self.logvar_layer = nn.Linear(embed_dim, embed_dim)  # Log-variance for reparameterization
 
-        # Transformer for processing latent space
+        # Transformer processing latent space
         self.transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads), 
             num_layers=num_layers
@@ -24,11 +26,26 @@ class ShapeAutoencoder(nn.Module):
         # Decoder: Maps latent space back to shape
         self.decoder = nn.Linear(embed_dim, 2)
 
+    def reparameterize(self, mu, logvar):
+        """Reparameterization trick to sample from N(mu, sigma^2)"""
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)  # Random normal noise
+        return mu + eps * std
+
+    def encode(self, points):
+        x = self.encoder(points)
+        mu = self.mu_layer(x)
+        logvar = self.logvar_layer(x)
+        z = self.reparameterize(mu, logvar)
+        return z, mu, logvar  # Return latent sample and distribution parameters
+
+    def decode(self, z):
+        z = self.transformer(z)
+        return self.decoder(z)
+
     def forward(self, points):
-        x = self.encoder(points)  # Encode (batch, seq_len, embed_dim)
-        x = self.transformer(x)   # Transformer processes (batch, seq_len, embed_dim)
-        x = self.decoder(x)       # Decode back to (batch, seq_len, 2)
-        return x
+        z, mu, logvar = self.encode(points)
+        return self.decode(z), mu, logvar  # Output reconstruction and latent parameters
 
 # Define Shapes
 def square():
@@ -47,14 +64,14 @@ def circle():
 # Augmentation: Random Rotation and Flip
 def augment_shape(shape):
     # Random rotation
-    angle = np.random.uniform(0, 2 * np.pi)  # Random angle in radians
+    angle = np.random.uniform(0, 2 * np.pi)
     rotation_matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
-    rotated_shape = shape @ rotation_matrix.T  # Apply rotation
+    rotated_shape = shape @ rotation_matrix.T
 
     # Random flip
-    if np.random.rand() > 0.5:  # 50% chance to flip along x-axis
+    if np.random.rand() > 0.5:
         rotated_shape[:, 0] *= -1
-    if np.random.rand() > 0.5:  # 50% chance to flip along y-axis
+    if np.random.rand() > 0.5:
         rotated_shape[:, 1] *= -1
 
     return rotated_shape
@@ -71,9 +88,12 @@ padded_shapes = np.array([np.pad(shape, ((0, max_len - len(shape)), (0, 0)), mod
 shapes_tensor = torch.tensor(padded_shapes, dtype=torch.float32).to(device)
 
 # Initialize model
-model = ShapeAutoencoder().to(device)
+model = VariationalShapeAutoencoder().to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 criterion = nn.MSELoss()
+
+def kl_divergence(mu, logvar):
+    return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
 # Training loop
 epochs = 2000
@@ -85,14 +105,17 @@ for epoch in range(epochs):
     padded_shapes = np.array([np.pad(shape, ((0, max_len - len(shape)), (0, 0)), mode='constant') for shape in augmented_shapes])
     shapes_tensor = torch.tensor(padded_shapes, dtype=torch.float32).to(device)
 
-    output = model(shapes_tensor)
-    loss = criterion(output, shapes_tensor)
+    output, mu, logvar = model(shapes_tensor)
+    recon_loss = criterion(output, shapes_tensor)
+    kl_loss = kl_divergence(mu, logvar)
+    loss = recon_loss + 0.001 * kl_loss  # Balance reconstruction and regularization
+
     loss.backward()
     optimizer.step()
 
     if epoch % 100 == 0:
-        print(f"Epoch {epoch}, Loss: {loss.item()}")
+        print(f"Epoch {epoch}, Loss: {loss.item()} (Recon: {recon_loss.item()}, KL: {kl_loss.item()})")
 
 # Save model
-torch.save(model.state_dict(), "polygon_autoencoder.pth")
-print("Model trained and saved successfully!")
+torch.save(model.state_dict(), "polygon_vae.pth")
+print("Variational Autoencoder trained and saved successfully!")

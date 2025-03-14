@@ -1,36 +1,42 @@
-# Shape Transformer Autoencoder
+# Shape Transformer Variational Autoencoder
 
-This project implements a **Transformer-based Autoencoder** for learning and interpolating 2D shapes. The model encodes shapes into a latent space using a Transformer, enabling smooth shape reconstruction and interpolation.
-
-## Features
-- **Transformer-based Autoencoder** for shape encoding and reconstruction.
-- **Latent Space Interpolation** between shapes.
-- **Customizable Model Parameters** (embedding size, transformer layers, etc.).
+This project implements a **Transformer-based Variational Autoencoder (VAE)** for learning and interpolating 2D shapes. The model encodes shapes into a structured latent space using a Transformer, enabling smooth shape reconstruction and interpolation with better generalization.
 
 ## Model Architecture
 The model consists of three main components:
 
 ### 1. **Encoder**
-- Maps 2D points to a higher-dimensional **latent space** using a linear layer.  
+- Maps 2D points to a **latent distribution** (mean **μ** and log-variance **logσ²**) using a linear layer.
+- Uses the **reparameterization trick** to sample latent vectors, allowing stochastic encoding.
 
 ### 2. **Transformer**
-- Processes the latent representations to **capture spatial relationships**.  
-- Uses **multi-head self-attention** for better feature extraction.  
+- Processes latent representations to **capture spatial relationships**.
+- Uses **multi-head self-attention** for improved feature extraction and robustness to transformations.
 
 ### 3. **Decoder**
-- Maps the processed latent space **back to 2D points** for shape reconstruction.  
+- Maps the sampled latent vector **back to 2D points** for shape reconstruction.
 
-## Why Use an Autoencoder and Latent Space?
+## Why Use a Variational Autoencoder (VAE) and Latent Space?
 
-### **Dimensionality Reduction**
-- The autoencoder **compresses** high-dimensional shape information into a compact **latent representation**, allowing for efficient storage and manipulation.
+### **Structured Latent Representations**
+- Unlike standard autoencoders, VAEs learn a **probabilistic latent space**, ensuring smooth transitions between shapes and preventing overfitting to specific examples.
 
-### **Smooth Shape Interpolation**
-- By mapping shapes to a continuous latent space, we can interpolate between them smoothly, **generating intermediate shapes** that blend features from both inputs.
+### **Better Interpolation and Robustness**
+- Traditional autoencoders learn absolute vertex positions, making interpolations sensitive to shape order or transformations (e.g., flipping).
+- VAEs enforce **smooth and meaningful latent transitions**, making interpolation **more stable and natural**.
 
-### **Feature Extraction & Generalization**
-- The Transformer-based encoder **learns meaningful shape representations**, capturing underlying patterns instead of just memorizing input shapes.
-- The model can generalize to **unseen shapes** by learning a structured latent space.
+### **Regularization with KL Divergence**
+- The **Kullback-Leibler (KL) divergence loss** ensures that the latent space follows a **continuous and structured Gaussian distribution**, leading to better generalization to unseen shapes.
 
 ## Training
-The model is trained using **Mean Squared Error (MSE) Loss** to minimize the reconstruction error between input and output shapes.
+The model is trained using a **combined loss function**:
+1. **Reconstruction Loss** (Mean Squared Error - MSE): Measures how well the reconstructed shape matches the input.
+2. **KL Divergence Loss**: Regularizes the latent space to follow a Gaussian distribution.
+
+## Example: Shape Interpolation
+By encoding a **square** and a **circle** into the latent space, we can smoothly interpolate between them, generating **intermediate shapes** that blend both features.
+
+## Future Improvements
+- Implementing **latent space arithmetic** (e.g., adding geometric features).
+- Experimenting with **higher-dimensional latent spaces** for more complex shapes.
+- Exploring **conditional VAEs** to generate shapes based on user-defined attributes.
