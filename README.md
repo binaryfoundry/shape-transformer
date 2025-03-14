@@ -1,42 +1,62 @@
-# Shape Transformer Variational Autoencoder
+# ShapeVAE: Learning and Generating 2D Shapes
 
-This project implements a **Transformer-based Variational Autoencoder (VAE)** for learning and interpolating 2D shapes. The model encodes shapes into a structured latent space using a Transformer, enabling smooth shape reconstruction and interpolation with better generalization.
+## 📌 Overview
+ShapeVAE is a **Variational Autoencoder (VAE) with a Transformer-based architecture** that learns to encode and generate 2D shapes. The model is trained on sequences of 2D points extracted from SVG files, learning to reconstruct paths and generate new, unique shapes.
 
-## Model Architecture
-The model consists of three main components:
+## 🚀 Features
+- **Transformer-based Encoder & Decoder** for processing sequential 2D points.
+- **VAE Architecture** enables meaningful latent space interpolation.
+- **Scalable Training** to learn from thousands of SVGs.
+- **Inference Mode** to generate new shapes and visualize them.
 
-### 1. **Encoder**
-- Maps 2D points to a **latent distribution** (mean **μ** and log-variance **logσ²**) using a linear layer.
-- Uses the **reparameterization trick** to sample latent vectors, allowing stochastic encoding.
+## 🏗️ Model Architecture
+1. **Encoder (TransformerEncoder)**
+   - Embeds 2D points (x, y) into a higher-dimensional space.
+   - Processes sequences with Transformer layers.
+   - Outputs mean (`mu`) and log variance (`logvar`) for latent representation.
 
-### 2. **Transformer**
-- Processes latent representations to **capture spatial relationships**.
-- Uses **multi-head self-attention** for improved feature extraction and robustness to transformations.
+2. **Latent Space (VAE Reparameterization)**
+   - Uses `mu` and `logvar` to sample latent vectors via the reparameterization trick.
 
-### 3. **Decoder**
-- Maps the sampled latent vector **back to 2D points** for shape reconstruction.
+3. **Decoder (TransformerDecoder)**
+   - Takes the latent vector and reconstructs the sequence of 2D points.
+   - Outputs generated paths in a structured format.
 
-## Why Use a Variational Autoencoder (VAE) and Latent Space?
+## 📊 Training Details
+- **Dataset:** SVG files converted into sequences of 2D points.
+- **Loss Function:** VAE loss = MSE (Reconstruction Loss) + KL Divergence.
+- **Optimizer:** Adam with a learning rate of `1e-4`.
+- **Training Data Size:** At least **10,000 SVGs** recommended for viable results.
+- **Hardware:** Runs on both **CPU and GPU** (CUDA-enabled if available).
 
-### **Structured Latent Representations**
-- Unlike standard autoencoders, VAEs learn a **probabilistic latent space**, ensuring smooth transitions between shapes and preventing overfitting to specific examples.
+## 🔧 Setup & Usage
+### 1️⃣ Install Dependencies
+```bash
+pip install torch numpy matplotlib
+```
 
-### **Better Interpolation and Robustness**
-- Traditional autoencoders learn absolute vertex positions, making interpolations sensitive to shape order or transformations (e.g., flipping).
-- VAEs enforce **smooth and meaningful latent transitions**, making interpolation **more stable and natural**.
+### 2️⃣ Train the Model
+```bash
+python train.py
+```
 
-### **Regularization with KL Divergence**
-- The **Kullback-Leibler (KL) divergence loss** ensures that the latent space follows a **continuous and structured Gaussian distribution**, leading to better generalization to unseen shapes.
+### 3️⃣ Generate New Shapes
+```bash
+python inference.py
+```
 
-## Training
-The model is trained using a **combined loss function**:
-1. **Reconstruction Loss** (Mean Squared Error - MSE): Measures how well the reconstructed shape matches the input.
-2. **KL Divergence Loss**: Regularizes the latent space to follow a Gaussian distribution.
+## 📈 Results & Visualization
+After training, the model can generate diverse 2D shapes. The `inference.py` script plots the generated shapes using Matplotlib.
 
-## Example: Shape Interpolation
-By encoding a **square** and a **circle** into the latent space, we can smoothly interpolate between them, generating **intermediate shapes** that blend both features.
+## 📌 Notes
+- If results are poor, increase training data or tune hyperparameters.
+- For best results, use at least **10,000+ SVGs**.
 
-## Future Improvements
-- Implementing **latent space arithmetic** (e.g., adding geometric features).
-- Experimenting with **higher-dimensional latent spaces** for more complex shapes.
-- Exploring **conditional VAEs** to generate shapes based on user-defined attributes.
+## 🛠 Future Improvements
+- Support for more complex shape structures (e.g., curves, multiple paths).
+- Conditional shape generation (e.g., generate shapes based on categories).
+- Improved latent space interpolation for smoother shape morphing.
+
+---
+🎨 **ShapeVAE: Learn & Create Unique 2D Forms!** 🚀
+
